@@ -13,10 +13,33 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
+    <Filter Include="Source Files\Shaders">
+      <UniqueIdentifier>{0507490a-95ea-4b6d-8009-d9f5a2169551}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\My Scripts">
+      <UniqueIdentifier>{bed9f400-d3ec-408e-9996-30b4c9df2ef2}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="compile.bat">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="shaders\frag.spv">
+      <Filter>Source Files\Shaders</Filter>
+    </None>
+    <None Include="shaders\vert.spv">
+      <Filter>Source Files\Shaders</Filter>
+    </None>
+    <None Include="shaders\triangle.frag">
+      <Filter>Source Files\Shaders</Filter>
+    </None>
+    <None Include="shaders\triangle.vert">
+      <Filter>Source Files\Shaders</Filter>
+    </None>
   </ItemGroup>
 </Project>
