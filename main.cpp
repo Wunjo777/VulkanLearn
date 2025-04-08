@@ -16,6 +16,8 @@
 const uint32_t WIDTH = 800;
 const uint32_t HEIGHT = 600;
 
+const int MAX_FRAMES_IN_FLIGHT = 2;
+
 //validation layer list
 const std::vector<const char*> validationLayers = {
 	"VK_LAYER_KHRONOS_validation" };//we can add more such as:"VK_LAYER_LUNARG_api_dump"
@@ -97,26 +99,35 @@ private:
 	//automatically destroyed after swap chain being destroyed
 	std::vector<VkImage> swapChainImages;
 	VkFormat swapChainImageFormat;
-	VkExtent2D swapChainExtent;
+	VkExtent2D swapChainExtent;//交换链图像尺寸
 	std::vector<VkImageView> swapChainImageViews;
 	std::vector<VkFramebuffer> swapChainFramebuffers;
 	VkRenderPass renderPass;
 	VkPipelineLayout pipelineLayout;
 	VkPipeline graphicsPipeline;
 	VkCommandPool commandPool;
-	VkCommandBuffer commandBuffer;
-	VkSemaphore imageAvailableSemaphore;//表示已从交换链获取图像并准备好进行渲染
-	VkSemaphore renderFinishedSemaphore;//表示渲染已完成并且可以进行呈现
-	VkFence inFlightFence;//确保一次只渲染一帧
+	std::vector<VkCommandBuffer> commandBuffers;
+	std::vector<VkSemaphore> imageAvailableSemaphores;//表示已从交换链获取图像并准备好进行渲染
+	std::vector<VkSemaphore> renderFinishedSemaphores;//表示渲染已完成并且可以进行呈现
+	std::vector<VkFence> inFlightFences;//确保一次只渲染一帧
+	uint32_t currentFrame = 0;
+	bool framebufferResized = false;
 
 	void initWindow()
 	{
 		glfwInit();
-		// tell glfw do not use opengl
+		//tell glfw do not use OPENGL
 		glfwWindowHint( GLFW_CLIENT_API, GLFW_NO_API );
-		glfwWindowHint( GLFW_RESIZABLE, GLFW_FALSE );
-
+		//create window
 		window = glfwCreateWindow( WIDTH, HEIGHT, "Vulkan", nullptr, nullptr );
+		glfwSetWindowUserPointer( window, this );
+		glfwSetFramebufferSizeCallback( window, framebufferResizeCallback );//glfwPollEvents()触发事件
+	}
+
+	static void framebufferResizeCallback( GLFWwindow* window, int width, int height )
+	{
+		auto app = reinterpret_cast<HelloTriangleApplication*>(glfwGetWindowUserPointer( window ));
+		app->framebufferResized = true;
 	}
 
 	void initVulkan()
@@ -132,7 +143,7 @@ private:
 		createGraphicsPipeline();
 		createFramebuffers();
 		createCommandPool();
-		createCommandBuffer();
+		createCommandBuffers();
 		createSyncObjects();
 	}
 
@@ -147,26 +158,39 @@ private:
 		vkDeviceWaitIdle( device );
 	}
 
-	void cleanup()
+	void cleanupSwapChain()
 	{
-		vkDestroySemaphore( device, renderFinishedSemaphore, nullptr );
-		vkDestroySemaphore( device, imageAvailableSemaphore, nullptr );
-		vkDestroyFence( device, inFlightFence, nullptr );
-
-		vkDestroyCommandPool( device, commandPool, nullptr );
 		for (auto framebuffer : swapChainFramebuffers)
 		{
 			vkDestroyFramebuffer( device, framebuffer, nullptr );
 		}
-		vkDestroyPipeline( device, graphicsPipeline, nullptr );
-		vkDestroyPipelineLayout( device, pipelineLayout, nullptr );
-		vkDestroyRenderPass( device, renderPass, nullptr );
 
 		for (auto imageView : swapChainImageViews)
 		{
 			vkDestroyImageView( device, imageView, nullptr );
 		}
+
 		vkDestroySwapchainKHR( device, swapChain, nullptr );
+	}
+
+	void cleanup()
+	{
+		cleanupSwapChain();
+
+		vkDestroyPipeline( device, graphicsPipeline, nullptr );
+		vkDestroyPipelineLayout( device, pipelineLayout, nullptr );
+
+		vkDestroyRenderPass( device, renderPass, nullptr );
+
+		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+		{
+			vkDestroySemaphore( device, renderFinishedSemaphores[i], nullptr );
+			vkDestroySemaphore( device, imageAvailableSemaphores[i], nullptr );
+			vkDestroyFence( device, inFlightFences[i], nullptr );
+		}
+
+		vkDestroyCommandPool( device, commandPool, nullptr );
+
 		vkDestroyDevice( device, nullptr );
 
 		if (enableValidationLayers)
@@ -178,8 +202,27 @@ private:
 		vkDestroyInstance( instance, nullptr );
 
 		glfwDestroyWindow( window );
-		//system( "pause" );
+
 		glfwTerminate();
+	}
+
+	void recreateSwapChain()
+	{
+		int width = 0, height = 0;
+		glfwGetFramebufferSize( window, &width, &height );
+		while (width == 0 || height == 0)
+		{
+			glfwGetFramebufferSize( window, &width, &height );
+			glfwWaitEvents();//阻塞，直到事件队列中有新的事件
+		}
+
+		vkDeviceWaitIdle( device );
+
+		cleanupSwapChain();
+
+		createSwapChain();
+		createImageViews();
+		createFramebuffers();
 	}
 
 	void createInstance()
@@ -631,19 +674,22 @@ private:
 		}
 	}
 
-	void createCommandBuffer()
+	void createCommandBuffers()
 	{
+		commandBuffers.resize( MAX_FRAMES_IN_FLIGHT );
+
 		VkCommandBufferAllocateInfo allocInfo{};
 		allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
 		allocInfo.commandPool = commandPool;
 		allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-		allocInfo.commandBufferCount = 1;
+		allocInfo.commandBufferCount = (uint32_t)commandBuffers.size();
 
-		if (vkAllocateCommandBuffers( device, &allocInfo, &commandBuffer ) != VK_SUCCESS)
+		if (vkAllocateCommandBuffers( device, &allocInfo, commandBuffers.data() ) != VK_SUCCESS)
 		{
 			throw std::runtime_error( "failed to allocate command buffers!" );
 		}
 	}
+
 	//把要执行的命令写入命令缓冲区
 	void recordCommandBuffer( VkCommandBuffer commandBuffer, uint32_t imageIndex )//要写入的当前交换链图像的索引
 	{
@@ -684,7 +730,7 @@ private:
 		scissor.offset = { 0, 0 };
 		scissor.extent = swapChainExtent;
 		vkCmdSetScissor( commandBuffer, 0, 1, &scissor );
-		
+
 		vkCmdDraw( commandBuffer, 3, 1, 0, 0 );//显示发出一个draw call
 
 		vkCmdEndRenderPass( commandBuffer );
@@ -697,50 +743,68 @@ private:
 
 	void createSyncObjects()
 	{
+		imageAvailableSemaphores.resize( MAX_FRAMES_IN_FLIGHT );
+		renderFinishedSemaphores.resize( MAX_FRAMES_IN_FLIGHT );
+		inFlightFences.resize( MAX_FRAMES_IN_FLIGHT );
+
 		VkSemaphoreCreateInfo semaphoreInfo{};
 		semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
 		VkFenceCreateInfo fenceInfo{};
 		fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-		fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;//创建处于已发出信号状态的信号量，确保第一帧能开始绘制
+		fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;//创建处于已发出信号状态的信号量，确保第一帧能绘制
 
-		if (vkCreateSemaphore( device, &semaphoreInfo, nullptr, &imageAvailableSemaphore ) != VK_SUCCESS ||
-			 vkCreateSemaphore( device, &semaphoreInfo, nullptr, &renderFinishedSemaphore ) != VK_SUCCESS ||
-			 vkCreateFence( device, &fenceInfo, nullptr, &inFlightFence ) != VK_SUCCESS)
+		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
 		{
-			throw std::runtime_error( "failed to create synchronization objects for a frame!" );
-		}
+			if (vkCreateSemaphore( device, &semaphoreInfo, nullptr, &imageAvailableSemaphores[i] ) != VK_SUCCESS ||
+				 vkCreateSemaphore( device, &semaphoreInfo, nullptr, &renderFinishedSemaphores[i] ) != VK_SUCCESS ||
+				 vkCreateFence( device, &fenceInfo, nullptr, &inFlightFences[i] ) != VK_SUCCESS)
+			{
 
+				throw std::runtime_error( "failed to create synchronization objects for a frame!" );
+			}
+		}
 	}
 
 	void drawFrame()
 	{
-		vkWaitForFences( device, 1, &inFlightFence, VK_TRUE, UINT64_MAX );
-		vkResetFences( device, 1, &inFlightFence );
+		vkWaitForFences( device, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX );
 
-		uint32_t imageIndex;//the return value from vkAcquireNextImageKHR()
-		vkAcquireNextImageKHR( device, swapChain, UINT64_MAX, imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex );
+		uint32_t imageIndex;
+		VkResult result = vkAcquireNextImageKHR( device, swapChain, UINT64_MAX, imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex );
 
-		vkResetCommandBuffer( commandBuffer, /*VkCommandBufferResetFlagBits*/ 0 );
-		recordCommandBuffer( commandBuffer, imageIndex );
+		if (result == VK_ERROR_OUT_OF_DATE_KHR)
+		{
+			recreateSwapChain();
+			return;
+		}
+		else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR)
+		{
+			throw std::runtime_error( "failed to acquire swap chain image!" );
+		}
+
+		vkResetFences( device, 1, &inFlightFences[currentFrame] );//注意顺序，防止死锁
+
+		vkResetCommandBuffer( commandBuffers[currentFrame], /*VkCommandBufferResetFlagBits*/ 0 );
+		recordCommandBuffer( commandBuffers[currentFrame], imageIndex );
 
 		VkSubmitInfo submitInfo{};
 		submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-		//等待渲染semaphore
-		VkSemaphore waitSemaphores[] = { imageAvailableSemaphore };//与waitStage索引相对应
+
+		VkSemaphore waitSemaphores[] = { imageAvailableSemaphores[currentFrame] };
 		VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
 		submitInfo.waitSemaphoreCount = 1;
 		submitInfo.pWaitSemaphores = waitSemaphores;
 		submitInfo.pWaitDstStageMask = waitStages;
 
 		submitInfo.commandBufferCount = 1;
-		submitInfo.pCommandBuffers = &commandBuffer;
-		//发出呈现semaphore
-		VkSemaphore signalSemaphores[] = { renderFinishedSemaphore };
+		submitInfo.pCommandBuffers = &commandBuffers[currentFrame];
+
+		VkSemaphore signalSemaphores[] = { renderFinishedSemaphores[currentFrame] };
 		submitInfo.signalSemaphoreCount = 1;
 		submitInfo.pSignalSemaphores = signalSemaphores;
 
-		if (vkQueueSubmit( graphicsQueue, 1, &submitInfo, inFlightFence ) != VK_SUCCESS)//发出栅栏信号，表示命令缓冲区已可以重用
+		if (vkQueueSubmit( graphicsQueue, 1, &submitInfo, inFlightFences[currentFrame] ) != VK_SUCCESS)
 		{
 			throw std::runtime_error( "failed to submit draw command buffer!" );
 		}
@@ -757,7 +821,19 @@ private:
 
 		presentInfo.pImageIndices = &imageIndex;
 
-		vkQueuePresentKHR( presentQueue, &presentInfo );
+		result = vkQueuePresentKHR( presentQueue, &presentInfo );
+
+		if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || framebufferResized)
+		{
+			framebufferResized = false;
+			recreateSwapChain();//当前帧显示失败，交换链被重建（调整窗口时画面不动）
+		}
+		else if (result != VK_SUCCESS)
+		{
+			throw std::runtime_error( "failed to present swap chain image!" );
+		}
+
+		currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 	}
 
 	VkShaderModule createShaderModule( const std::vector<char>& code )
