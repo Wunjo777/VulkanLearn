@@ -6,23 +6,23 @@ Vulkan渲染学习
 
 ---
 
-![运行效果图](images/screenshot.png)
+![运行效果图](vulkan_show.png)
 
 ---
 
-![思维导图](images/screenshot.png)
+![思维导图](思维导图.png)
 
 ---
 
-![图1](images/screenshot.png)
+![图1](图1.png)
 
 ---
 
-![图2](images/screenshot.png)
+![图2](图2.png)
 
 ---
 
-![图3](images/screenshot.png)
+![图3](图3.png)
 
 
 ### 后记
