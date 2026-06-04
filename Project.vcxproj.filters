@@ -26,9 +26,6 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <None Include="compile.bat">
-      <Filter>Source Files</Filter>
-    </None>
     <None Include="shaders\frag.spv">
       <Filter>Source Files\Shaders</Filter>
     </None>
